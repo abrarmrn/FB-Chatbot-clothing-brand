@@ -1,0 +1,519 @@
+{
+  "name": "FB Messenger Chatbot - Clothing Brand",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "fb-webhook",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1111111-1111-1111-1111-111111111111",
+      "name": "FB Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 200],
+      "webhookId": "fb-webhook-get"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Facebook webhook verification handshake.\n// Set FB_VERIFY_TOKEN env in n8n to whatever you put in the FB App webhook config.\nconst expected = $env.FB_VERIFY_TOKEN || 'change-me-verify-token';\nconst q = $input.first().json.query || {};\nif (q['hub.mode'] === 'subscribe' && q['hub.verify_token'] === expected) {\n  return [{ json: { challenge: q['hub.challenge'] } }];\n}\nreturn [{ json: { error: 'verify failed' }, pairedItem: 0 }];"
+      },
+      "id": "a2222222-2222-2222-2222-222222222222",
+      "name": "Verify Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}"
+      },
+      "id": "a3333333-3333-3333-3333-333333333333",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b1111111-1111-1111-1111-111111111111",
+      "name": "FB Webhook (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 520],
+      "webhookId": "fb-webhook-post"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "EVENT_RECEIVED",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "b2222222-2222-2222-2222-222222222222",
+      "name": "Ack 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 520]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Flatten Messenger entry[].messaging[] into one item per user message.\n// Skips delivery / read receipts and anything without a sender id.\nconst body = $input.first().json.body || {};\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const ev of entry.messaging || []) {\n    if (!ev.sender || !ev.sender.id) continue;\n    if (!ev.message && !ev.postback) continue;\n    if (ev.message && (ev.message.is_echo || ev.delivery || ev.read)) continue;\n    const att = (ev.message && ev.message.attachments) || [];\n    const audio = att.find(a => a.type === 'audio');\n    out.push({\n      json: {\n        psid: ev.sender.id,\n        page_id: ev.recipient && ev.recipient.id,\n        timestamp: ev.timestamp,\n        text: (ev.message && ev.message.text) || (ev.postback && ev.postback.title) || '',\n        audio_url: audio ? audio.payload.url : null,\n        is_audio: !!audio\n      }\n    });\n  }\n}\nreturn out;"
+      },
+      "id": "b3333333-3333-3333-3333-333333333333",
+      "name": "Extract Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 520]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.is_audio }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b4444444-4444-4444-4444-444444444444",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 520]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.audio_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "c1111111-1111-1111-1111-111111111111",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "whisper-1" },
+            { "name": "file", "parameterType": "formBinaryData", "inputDataFieldName": "data" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c2222222-2222-2222-2222-222222222222",
+      "name": "Whisper Transcribe",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OPENAI_HEADER_AUTH",
+          "name": "OpenAI Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "messageText",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            { "id": "s2", "name": "psid", "value": "={{ $('Extract Event').item.json.psid }}", "type": "string" },
+            { "id": "s3", "name": "page_id", "value": "={{ $('Extract Event').item.json.page_id }}", "type": "string" },
+            { "id": "s4", "name": "source", "value": "audio", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c3333333-3333-3333-3333-333333333333",
+      "name": "Set Text (audio)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "s1", "name": "messageText", "value": "={{ $json.text }}", "type": "string" },
+            { "id": "s2", "name": "psid", "value": "={{ $json.psid }}", "type": "string" },
+            { "id": "s3", "name": "page_id", "value": "={{ $json.page_id }}", "type": "string" },
+            { "id": "s4", "name": "source", "value": "text", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c4444444-4444-4444-4444-444444444444",
+      "name": "Set Text (text)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 640]
+    },
+    {
+      "parameters": {
+        "numberInputs": 2
+      },
+      "id": "d1111111-1111-1111-1111-111111111111",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1780, 520]
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Users",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "psid",
+              "lookupValue": "={{ $json.psid }}"
+            }
+          ]
+        },
+        "options": {
+          "returnAllMatches": false
+        }
+      },
+      "id": "d2222222-2222-2222-2222-222222222222",
+      "name": "Get User Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2000, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_OAUTH",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge user-row (may be empty for new users) with the inbound message.\n// Decide whether the AI should reply at all.\nconst inbound = $('Merge').item.json;\nconst row = $input.first().json || {};\nconst hasRow = !!row.psid;\n\nconst aiEnabledRaw = String(row.ai_enabled || 'TRUE').toUpperCase();\nconst aiEnabled = hasRow ? (aiEnabledRaw === 'TRUE' || aiEnabledRaw === '1') : true;\n\nlet memory = [];\ntry { memory = row.memory ? JSON.parse(row.memory) : []; } catch (e) { memory = []; }\n\nreturn [{\n  json: {\n    psid: inbound.psid,\n    page_id: inbound.page_id,\n    messageText: inbound.messageText,\n    source: inbound.source,\n    user_exists: hasRow,\n    user_name: row.name || '',\n    status: row.status || 'new',\n    followup_count: Number(row.followup_count || 0),\n    ai_enabled: aiEnabled,\n    memory\n  }\n}];"
+      },
+      "id": "d3333333-3333-3333-3333-333333333333",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 520]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "ai1",
+              "leftValue": "={{ $json.ai_enabled }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4444444-4444-4444-4444-444444444444",
+      "name": "AI Enabled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2440, 520]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Products", "mode": "name" },
+        "options": {}
+      },
+      "id": "h1111111-1111-1111-1111-111111111111",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2560, 460],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS_OAUTH", "name": "Google Sheets account" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the OpenAI chat payload: system prompt + products catalog + memory + new user message.\n// Products come from the previous 'Get Products' node (all rows).\nconst productsRaw = $input.all().map(i => i.json);\nconst activeProducts = productsRaw.filter(p => p && p.product_id && String(p.status || '').toLowerCase() === 'active' && Number(p.stock || 0) > 0);\n\n// Build a compact catalog string for the prompt (keeps tokens low).\nlet catalog = '';\nif (activeProducts.length > 0) {\n  catalog = '\\n\\nPRODUCT CATALOG (use this data for price, availability, size, color, suggestions):\\n';\n  catalog += 'ID | Name | Category | Sizes | Colors | Price(BDT) | Stock\\n';\n  for (const p of activeProducts) {\n    catalog += `${p.product_id} | ${p.name} | ${p.category} | ${p.size} | ${p.color} | ${p.price} | ${p.stock}\\n`;\n  }\n  catalog += '\\nRULES for using catalog:\\n- Quote exact price from catalog. Never guess.\\n- If product out of stock (not listed above), say \"eita ekhon stock e nai\".\\n- If user asks about size/color not in catalog, say unavailable and suggest what IS available.\\n- When confirming an order, include the catalog price in your confirmation.\\n- If user\\'s request is ambiguous (multiple matches), ask 1 short clarifying question.\\n- Suggest similar products from catalog when relevant.';\n} else {\n  catalog = '\\n\\n(No active products in catalog right now. If user asks about products, say \"ektu wait koren, stock update hocche\".)';\n}\n\nconst SYSTEM_PROMPT = `You are \"Rumi\", the customer-support assistant for a Bangladeshi clothing brand that sells Panjabi, Saree, Kurti and T-shirts on Facebook.\n\nLANGUAGE: Reply ONLY in Banglish (Bangla in Roman letters). Examples: \"Apnar order ti confirm hoyeche, dhonnobad!\" / \"Ji apu, kon size lagbe?\". Never use Bangla script.\n\nSTYLE: Maximum 1-2 short sentences, under 200 characters. Warm, polite, human. Use \"apu\"/\"bhai\" naturally. No emojis except optional one at end.\n\nPRODUCT KNOWLEDGE: You have the live product catalog below. Use it to answer price, size, color, availability, and suggest products. NEVER invent prices or stock — only use what is in the catalog. If info is missing or ambiguous, ask 1 short clarifying question in Banglish.\n\nORDER CAPTURE: Ask one field at a time: product, size, quantity, address, phone. Once all five are gathered, confirm with catalog price in one Banglish line and set intent=\"order\" with fields filled (include product_id). Leave unknown fields null.\n\nNEEDS_HUMAN=true when: user asks for human/agent, is angry/complaining, wants refund/return, off-topic, or repeats same question 3+ times unresolved.\n\nReturn STRICT JSON only (no markdown):\n{\n  \"reply\": \"<banglish 1-2 sentences>\",\n  \"intent\": \"greeting|product_info|order|order_status|small_talk|complaint|support\",\n  \"needs_human\": true|false,\n  \"order\": { \"product_id\": null|string, \"product\": null|string, \"size\": null|string, \"quantity\": null|number, \"price\": null|number, \"address\": null|string, \"phone\": null|string }\n}` + catalog;\n\nconst ctx = $('AI Enabled?').first().json;\nconst messages = [{ role: 'system', content: SYSTEM_PROMPT }];\nfor (const turn of (ctx.memory || []).slice(-5)) messages.push(turn);\nmessages.push({ role: 'user', content: ctx.messageText || '(empty message)' });\n\nreturn [{\n  json: {\n    psid: ctx.psid,\n    page_id: ctx.page_id,\n    messageText: ctx.messageText,\n    user_name: ctx.user_name,\n    status: ctx.status,\n    followup_count: ctx.followup_count,\n    user_exists: ctx.user_exists,\n    memory: ctx.memory,\n    payload: {\n      model: 'gpt-4o-mini',\n      response_format: { type: 'json_object' },\n      temperature: 0.4,\n      max_tokens: 250,\n      messages\n    }\n  }\n}];"
+      },
+      "id": "e1111111-1111-1111-1111-111111111111",
+      "name": "Build OpenAI Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2780, 460]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "e2222222-2222-2222-2222-222222222222",
+      "name": "OpenAI Chat",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3000, 460],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OPENAI_HEADER_AUTH",
+          "name": "OpenAI Bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the LLM JSON output and decide what side-effects to fire.\nconst prev = $('Build OpenAI Payload').item.json;\nconst raw = $input.first().json;\nconst content = raw.choices && raw.choices[0] && raw.choices[0].message && raw.choices[0].message.content || '{}';\n\nlet ai;\ntry { ai = JSON.parse(content); }\ncatch (e) {\n  ai = { reply: 'Ektu wait koren, ami check kore janacchi.', intent: 'support', needs_human: true, order: {} };\n}\n\nconst reply = (ai.reply || '').toString().slice(0, 240);\nconst intent = ai.intent || 'small_talk';\nconst needsHuman = !!ai.needs_human;\nconst order = ai.order || {};\nconst orderComplete = !!(order.product && order.size && order.quantity && order.address && order.phone);\n\n// Update memory: keep last 5 turns total (user + assistant pairs).\nconst newMemory = [...(prev.memory || []), { role: 'user', content: prev.messageText }, { role: 'assistant', content: reply }].slice(-10);\n\nreturn [{\n  json: {\n    psid: prev.psid,\n    page_id: prev.page_id,\n    user_name: prev.user_name,\n    user_exists: prev.user_exists,\n    status: prev.status,\n    followup_count: prev.followup_count,\n    messageText: prev.messageText,\n    reply,\n    intent,\n    needs_human: needsHuman,\n    order_complete: orderComplete,\n    order,\n    memory_json: JSON.stringify(newMemory),\n    now_iso: new Date().toISOString(),\n    new_status: needsHuman ? 'lead' : (orderComplete ? 'customer' : (prev.status || 'lead')),\n    new_ai_enabled: needsHuman ? 'FALSE' : 'TRUE',\n    order_id: orderComplete ? ('ORD-' + Date.now()) : ''\n  }\n}];"
+      },
+      "id": "e3333333-3333-3333-3333-333333333333",
+      "name": "Parse AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3220, 460]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "h1",
+              "leftValue": "={{ $json.needs_human }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1111111-1111-1111-1111-111111111111",
+      "name": "Needs Human?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3320, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $env.TELEGRAM_CHAT_ID }}\",\n  \"parse_mode\": \"HTML\",\n  \"text\": \"<b>Human support needed</b>\\nUser: {{ $json.user_name || $json.psid }}\\nPSID: <code>{{ $json.psid }}</code>\\nMsg: {{ $json.messageText }}\\nIntent: {{ $json.intent }}\"\n}",
+        "options": {}
+      },
+      "id": "f2222222-2222-2222-2222-222222222222",
+      "name": "Telegram Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3540, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "o1",
+              "leftValue": "={{ $json.order_complete }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f3333333-3333-3333-3333-333333333333",
+      "name": "Order Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3320, 460]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Orders", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id": "={{ $json.order_id }}",
+            "psid": "={{ $json.psid }}",
+            "customer_name": "={{ $json.user_name }}",
+            "product": "={{ $json.order.product }}",
+            "size": "={{ $json.order.size }}",
+            "quantity": "={{ $json.order.quantity }}",
+            "price": "={{ $json.order.price || '' }}",
+            "address": "={{ $json.order.address }}",
+            "phone": "={{ $json.order.phone }}",
+            "status": "pending",
+            "note": "={{ $json.order.product_id ? 'Product ID: ' + $json.order.product_id : 'Auto-captured by chatbot' }}",
+            "created_at": "={{ $json.now_iso }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "f4444444-4444-4444-4444-444444444444",
+      "name": "Append Order",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3540, 460],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS_OAUTH", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/me/messages?access_token={{ $env.FB_PAGE_TOKEN }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $('Parse AI').item.json.psid }}\" },\n  \"messaging_type\": \"RESPONSE\",\n  \"message\": { \"text\": {{ JSON.stringify($('Parse AI').item.json.reply) }} }\n}",
+        "options": {}
+      },
+      "id": "g1111111-1111-1111-1111-111111111111",
+      "name": "Send FB Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3320, 640]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["psid"],
+          "value": {
+            "psid": "={{ $('Parse AI').item.json.psid }}",
+            "name": "={{ $('Parse AI').item.json.user_name }}",
+            "ai_enabled": "={{ $('Parse AI').item.json.new_ai_enabled }}",
+            "status": "={{ $('Parse AI').item.json.new_status }}",
+            "last_user_msg": "={{ $('Parse AI').item.json.messageText }}",
+            "last_bot_msg": "={{ $('Parse AI').item.json.reply }}",
+            "last_message_at": "={{ $('Parse AI').item.json.now_iso }}",
+            "memory": "={{ $('Parse AI').item.json.memory_json }}",
+            "followup_count": "0",
+            "created_at": "={{ $('Parse AI').item.json.now_iso }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "g2222222-2222-2222-2222-222222222222",
+      "name": "Upsert User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [3540, 640],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS_OAUTH", "name": "Google Sheets account" }
+      }
+    }
+  ],
+  "connections": {
+    "FB Verify (GET)": { "main": [[{ "node": "Verify Token", "type": "main", "index": 0 }]] },
+    "Verify Token": { "main": [[{ "node": "Respond Challenge", "type": "main", "index": 0 }]] },
+    "FB Webhook (POST)": { "main": [[
+      { "node": "Ack 200 OK", "type": "main", "index": 0 },
+      { "node": "Extract Event", "type": "main", "index": 0 }
+    ]] },
+    "Extract Event": { "main": [[{ "node": "Is Audio?", "type": "main", "index": 0 }]] },
+    "Is Audio?": { "main": [
+      [{ "node": "Download Audio", "type": "main", "index": 0 }],
+      [{ "node": "Set Text (text)", "type": "main", "index": 0 }]
+    ] },
+    "Download Audio": { "main": [[{ "node": "Whisper Transcribe", "type": "main", "index": 0 }]] },
+    "Whisper Transcribe": { "main": [[{ "node": "Set Text (audio)", "type": "main", "index": 0 }]] },
+    "Set Text (audio)": { "main": [[{ "node": "Merge", "type": "main", "index": 0 }]] },
+    "Set Text (text)":  { "main": [[{ "node": "Merge", "type": "main", "index": 1 }]] },
+    "Merge": { "main": [[{ "node": "Get User Row", "type": "main", "index": 0 }]] },
+    "Get User Row": { "main": [[{ "node": "Build Context", "type": "main", "index": 0 }]] },
+    "Build Context": { "main": [[{ "node": "AI Enabled?", "type": "main", "index": 0 }]] },
+    "AI Enabled?": { "main": [
+      [{ "node": "Get Products", "type": "main", "index": 0 }],
+      []
+    ] },
+    "Get Products": { "main": [[{ "node": "Build OpenAI Payload", "type": "main", "index": 0 }]] },
+    "Build OpenAI Payload": { "main": [[{ "node": "OpenAI Chat", "type": "main", "index": 0 }]] },
+    "OpenAI Chat": { "main": [[{ "node": "Parse AI", "type": "main", "index": 0 }]] },
+    "Parse AI": { "main": [[
+      { "node": "Needs Human?", "type": "main", "index": 0 },
+      { "node": "Order Complete?", "type": "main", "index": 0 },
+      { "node": "Send FB Reply", "type": "main", "index": 0 },
+      { "node": "Upsert User", "type": "main", "index": 0 }
+    ]] },
+    "Needs Human?": { "main": [
+      [{ "node": "Telegram Notify", "type": "main", "index": 0 }],
+      []
+    ] },
+    "Order Complete?": { "main": [
+      [{ "node": "Append Order", "type": "main", "index": 0 }],
+      []
+    ] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "pinData": {},
+  "tags": [{ "name": "messenger" }, { "name": "clothing-brand" }]
+}
