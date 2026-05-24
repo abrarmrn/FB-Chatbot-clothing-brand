@@ -66,6 +66,30 @@ for reporting. Skip this tab if you don't need it.
 
 ---
 
+## Tab 4: `Products`
+
+Your live product catalog. The AI reads this tab on every inbound message to
+answer price, availability, size/color questions, suggest products, and confirm
+orders with real prices.
+
+| Column        | Type    | Notes                                                        |
+| ------------- | ------- | ------------------------------------------------------------ |
+| `product_id`  | string  | Unique ID, e.g. `PRD-001`.                                   |
+| `name`        | string  | Display name, e.g. `Premium Panjabi - Navy Blue`.            |
+| `category`    | string  | `Panjabi` \| `Saree` \| `Kurti` \| `T-shirt` \| …           |
+| `size`        | string  | Comma-separated available sizes: `M, L, XL`.                |
+| `color`       | string  | Comma-separated colors: `Navy, White, Black`.                |
+| `price`       | number  | BDT. The AI quotes this to the customer.                     |
+| `stock`       | number  | Current units available. 0 = out of stock.                   |
+| `description` | string  | Short feature text (≤ 120 chars) for AI to summarize.        |
+| `image_url`   | string  | Public image URL (for future rich replies).                  |
+| `status`      | string  | `active` \| `inactive`. Inactive items are hidden from AI.   |
+
+> **Keep it lean:** ideally < 50 active rows. The full tab is injected into the
+> AI prompt as a compact table, so fewer rows = faster + cheaper tokens.
+
+---
+
 ## Why this shape
 
 - **`ai_enabled` is the kill-switch.** Every inbound message reads this flag first;

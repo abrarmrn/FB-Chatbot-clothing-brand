@@ -273,13 +273,30 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build the OpenAI chat payload: system prompt + memory + new user message.\nconst SYSTEM_PROMPT = `You are \"Rumi\", the customer-support assistant for a Bangladeshi clothing brand that sells Panjabi, Saree, Kurti and T-shirts on Facebook.\n\nLANGUAGE: Reply ONLY in Banglish (Bangla in Roman letters). Examples: \"Apnar order ti confirm hoyeche, dhonnobad!\" / \"Ji apu, kon size lagbe?\". Never use Bangla script.\n\nSTYLE: Maximum 1-2 short sentences, under 200 characters. Warm, polite, human. Use \"apu\"/\"bhai\" naturally. No emojis except optional one at end. Never invent prices, stock or delivery dates - if unsure say \"ektu wait koren, check kore janacchi\".\n\nORDER CAPTURE: Ask one field at a time: product, size, quantity, address, phone. Once all five are gathered, confirm in one Banglish line and set intent=\"order\" with fields filled. Leave unknown fields null.\n\nNEEDS_HUMAN=true when: user asks for human/agent, is angry/complaining, wants refund/return, off-topic, or repeats same question 3+ times unresolved.\n\nReturn STRICT JSON only (no markdown):\n{\n  \"reply\": \"<banglish 1-2 sentences>\",\n  \"intent\": \"greeting|product_info|order|order_status|small_talk|complaint|support\",\n  \"needs_human\": true|false,\n  \"order\": { \"product\": null|string, \"size\": null|string, \"quantity\": null|number, \"address\": null|string, \"phone\": null|string }\n}`;\n\nconst ctx = $input.first().json;\nconst messages = [{ role: 'system', content: SYSTEM_PROMPT }];\nfor (const turn of (ctx.memory || []).slice(-5)) messages.push(turn);\nmessages.push({ role: 'user', content: ctx.messageText || '(empty message)' });\n\nreturn [{\n  json: {\n    psid: ctx.psid,\n    page_id: ctx.page_id,\n    messageText: ctx.messageText,\n    user_name: ctx.user_name,\n    status: ctx.status,\n    followup_count: ctx.followup_count,\n    user_exists: ctx.user_exists,\n    memory: ctx.memory,\n    payload: {\n      model: 'gpt-4o-mini',\n      response_format: { type: 'json_object' },\n      temperature: 0.4,\n      max_tokens: 200,\n      messages\n    }\n  }\n}];"
+        "operation": "read",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEET_ID }}", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Products", "mode": "name" },
+        "options": {}
+      },
+      "id": "h1111111-1111-1111-1111-111111111111",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2560, 460],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GOOGLE_SHEETS_OAUTH", "name": "Google Sheets account" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the OpenAI chat payload: system prompt + products catalog + memory + new user message.\n// Products come from the previous 'Get Products' node (all rows).\nconst productsRaw = $input.all().map(i => i.json);\nconst activeProducts = productsRaw.filter(p => p && p.product_id && String(p.status || '').toLowerCase() === 'active' && Number(p.stock || 0) > 0);\n\n// Build a compact catalog string for the prompt (keeps tokens low).\nlet catalog = '';\nif (activeProducts.length > 0) {\n  catalog = '\\n\\nPRODUCT CATALOG (use this data for price, availability, size, color, suggestions):\\n';\n  catalog += 'ID | Name | Category | Sizes | Colors | Price(BDT) | Stock\\n';\n  for (const p of activeProducts) {\n    catalog += `${p.product_id} | ${p.name} | ${p.category} | ${p.size} | ${p.color} | ${p.price} | ${p.stock}\\n`;\n  }\n  catalog += '\\nRULES for using catalog:\\n- Quote exact price from catalog. Never guess.\\n- If product out of stock (not listed above), say \"eita ekhon stock e nai\".\\n- If user asks about size/color not in catalog, say unavailable and suggest what IS available.\\n- When confirming an order, include the catalog price in your confirmation.\\n- If user\\'s request is ambiguous (multiple matches), ask 1 short clarifying question.\\n- Suggest similar products from catalog when relevant.';\n} else {\n  catalog = '\\n\\n(No active products in catalog right now. If user asks about products, say \"ektu wait koren, stock update hocche\".)';\n}\n\nconst SYSTEM_PROMPT = `You are \"Rumi\", the customer-support assistant for a Bangladeshi clothing brand that sells Panjabi, Saree, Kurti and T-shirts on Facebook.\n\nLANGUAGE: Reply ONLY in Banglish (Bangla in Roman letters). Examples: \"Apnar order ti confirm hoyeche, dhonnobad!\" / \"Ji apu, kon size lagbe?\". Never use Bangla script.\n\nSTYLE: Maximum 1-2 short sentences, under 200 characters. Warm, polite, human. Use \"apu\"/\"bhai\" naturally. No emojis except optional one at end.\n\nPRODUCT KNOWLEDGE: You have the live product catalog below. Use it to answer price, size, color, availability, and suggest products. NEVER invent prices or stock — only use what is in the catalog. If info is missing or ambiguous, ask 1 short clarifying question in Banglish.\n\nORDER CAPTURE: Ask one field at a time: product, size, quantity, address, phone. Once all five are gathered, confirm with catalog price in one Banglish line and set intent=\"order\" with fields filled (include product_id). Leave unknown fields null.\n\nNEEDS_HUMAN=true when: user asks for human/agent, is angry/complaining, wants refund/return, off-topic, or repeats same question 3+ times unresolved.\n\nReturn STRICT JSON only (no markdown):\n{\n  \"reply\": \"<banglish 1-2 sentences>\",\n  \"intent\": \"greeting|product_info|order|order_status|small_talk|complaint|support\",\n  \"needs_human\": true|false,\n  \"order\": { \"product_id\": null|string, \"product\": null|string, \"size\": null|string, \"quantity\": null|number, \"price\": null|number, \"address\": null|string, \"phone\": null|string }\n}` + catalog;\n\nconst ctx = $('AI Enabled?').first().json;\nconst messages = [{ role: 'system', content: SYSTEM_PROMPT }];\nfor (const turn of (ctx.memory || []).slice(-5)) messages.push(turn);\nmessages.push({ role: 'user', content: ctx.messageText || '(empty message)' });\n\nreturn [{\n  json: {\n    psid: ctx.psid,\n    page_id: ctx.page_id,\n    messageText: ctx.messageText,\n    user_name: ctx.user_name,\n    status: ctx.status,\n    followup_count: ctx.followup_count,\n    user_exists: ctx.user_exists,\n    memory: ctx.memory,\n    payload: {\n      model: 'gpt-4o-mini',\n      response_format: { type: 'json_object' },\n      temperature: 0.4,\n      max_tokens: 250,\n      messages\n    }\n  }\n}];"
       },
       "id": "e1111111-1111-1111-1111-111111111111",
       "name": "Build OpenAI Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2660, 460]
+      "position": [2780, 460]
     },
     {
       "parameters": {
@@ -296,7 +313,7 @@
       "name": "OpenAI Chat",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2880, 460],
+      "position": [3000, 460],
       "credentials": {
         "httpHeaderAuth": {
           "id": "OPENAI_HEADER_AUTH",
@@ -312,7 +329,7 @@
       "name": "Parse AI",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3100, 460]
+      "position": [3220, 460]
     },
     {
       "parameters": {
@@ -387,11 +404,11 @@
             "product": "={{ $json.order.product }}",
             "size": "={{ $json.order.size }}",
             "quantity": "={{ $json.order.quantity }}",
-            "price": "",
+            "price": "={{ $json.order.price || '' }}",
             "address": "={{ $json.order.address }}",
             "phone": "={{ $json.order.phone }}",
             "status": "pending",
-            "note": "Auto-captured by chatbot",
+            "note": "={{ $json.order.product_id ? 'Product ID: ' + $json.order.product_id : 'Auto-captured by chatbot' }}",
             "created_at": "={{ $json.now_iso }}"
           }
         },
@@ -474,9 +491,10 @@
     "Get User Row": { "main": [[{ "node": "Build Context", "type": "main", "index": 0 }]] },
     "Build Context": { "main": [[{ "node": "AI Enabled?", "type": "main", "index": 0 }]] },
     "AI Enabled?": { "main": [
-      [{ "node": "Build OpenAI Payload", "type": "main", "index": 0 }],
+      [{ "node": "Get Products", "type": "main", "index": 0 }],
       []
     ] },
+    "Get Products": { "main": [[{ "node": "Build OpenAI Payload", "type": "main", "index": 0 }]] },
     "Build OpenAI Payload": { "main": [[{ "node": "OpenAI Chat", "type": "main", "index": 0 }]] },
     "OpenAI Chat": { "main": [[{ "node": "Parse AI", "type": "main", "index": 0 }]] },
     "Parse AI": { "main": [[
